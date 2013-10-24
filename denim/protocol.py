@@ -7,6 +7,18 @@ import base64
 import uuid
 
 
+def protocol_error(msg):
+    exc = ProtocolError(msg)
+    task = Task(0)
+    task.is_error = True
+    task.result = msg
+    return task
+
+
+class ProtocolError(Exception):
+    pass
+
+
 class Task(object):
     def __init__(self, f, args=None, kwargs=None):
         if args is None:
@@ -36,8 +48,9 @@ class Task(object):
 
 
 class Msg(object):
-    ERR = 'ERR'
-    ACK = 'ACK'
+    ERR = 0
+    ACK = 1
+    DO = 2
 
     def __init__(self, cmd, msgid=None, payload=None):
         if msgid is None:
@@ -48,7 +61,7 @@ class Msg(object):
         self.payload = payload
 
     def encode(self):
-        return "%s|%s|%s\n" % (
+        return "%d|%s|%s\n" % (
             self.cmd,
             self.msgid,
             base64.b64encode(pickle.dumps(self.payload)),
@@ -58,7 +71,7 @@ class Msg(object):
     def decode(line):
         (cmd, msgid, data) = line.split('|')
         payload = pickle.loads(base64.b64decode(data))
-        return Msg(cmd, msgid, payload)
+        return Msg(int(cmd), msgid, payload)
 
     def reply(self, cmd, payload=None):
         return Msg(cmd, self.msgid, payload=payload)

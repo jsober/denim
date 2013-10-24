@@ -1,1 +1,1 @@
-from tests.denim.protocol import *
+from tests.denim import *
