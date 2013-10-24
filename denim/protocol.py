@@ -53,8 +53,10 @@ class Task(object):
 class Msg(object):
     ERR = 0
     ACK = 1
-    DO = 2
-    DONE = 3
+    REG = 2
+    DO = 3
+    DONE = 4
+    QUEUE = 5
 
     def __init__(self, cmd, msgid=None, payload=None):
         if msgid is None:
