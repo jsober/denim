@@ -7,11 +7,14 @@ import base64
 import uuid
 
 
-def protocol_error(msg):
-    exc = ProtocolError(msg)
+def protocol_error(msg, exc=None):
+    if exc is None:
+        exc = ProtocolError(msg)
+
     task = Task(0)
     task.is_error = True
-    task.result = msg
+    task.result = exc
+
     return task
 
 
@@ -51,6 +54,7 @@ class Msg(object):
     ERR = 0
     ACK = 1
     DO = 2
+    DONE = 3
 
     def __init__(self, cmd, msgid=None, payload=None):
         if msgid is None:
@@ -61,7 +65,7 @@ class Msg(object):
         self.payload = payload
 
     def encode(self):
-        return "%d|%s|%s\n" % (
+        return "%d|%s|%s" % (
             self.cmd,
             self.msgid,
             base64.b64encode(pickle.dumps(self.payload)),
@@ -69,10 +73,13 @@ class Msg(object):
 
     @staticmethod
     def decode(line):
-        (cmd, msgid, data) = line.split('|')
-        payload = pickle.loads(base64.b64decode(data))
-        return Msg(int(cmd), msgid, payload)
+        try:
+            cmd, msgid, data = line.split('|')
+            payload = pickle.loads(base64.b64decode(data))
+            return Msg(int(cmd), msgid, payload)
+        except:
+            raise ProtocolError('Invalid message format')
 
     def reply(self, cmd, payload=None):
-        return Msg(cmd, self.msgid, payload=payload)
+        return Msg(cmd, self.msgid, payload)
 
