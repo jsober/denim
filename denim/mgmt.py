@@ -1,51 +1,18 @@
 from functools import partial
 from tornado.tcpserver import TCPServer
 from tornado import netutil
+from tornado.iostream import IOStream
 import socket
 
-from denim.protocol import Msg, protocol_error
+from denim.protocol import Task, Msg, ProtocolError, protocol_error
 
 
-def bind_unused_port():
+class Dispatcher(object):
     """
-    Creates a listening socket with an OS-assigned port. Returns tuple of
-    (socket, port_number).
+    Dispatches messages based on the message cmd.
     """
-    [sock] = netutil.bind_sockets(None, 'localhost', family=socket.AF_INET)
-    port = sock.getsockname()[1]
-    host = sock.getsockname()[0]
-    return sock, host, port
-
-
-class Service(TCPServer):
-    """
-    Basic framework for a TCP/IP listening service using the denim protocol.
-    Provides registration of callbacks based on the message command.
-    """
-    def __init__(self, port=None, host=None,*args, **kwargs):
-        """
-        Creates a service listening on port number `port`. If not specified,
-        uses an OS-assigned port. All other arguments are transparently
-        passed to the parent class' constructor.
-        """
-        super(Service, self).__init__(*args, **kwargs)
+    def __init__(self):
         self.dispatch = {}
-        self.port = port
-        self.host = host
-
-    def start(self, *args, **kwargs):
-        """
-        Starts the listening service. All arguments passed to parent.
-        """
-        if self.port:
-            self.bind(self.port, self.host)
-        else:
-            sock, host, port = bind_unused_port()
-            self.host = host
-            self.port = port
-            self.add_sockets([sock])
-
-        super(Service, self).start(*args, **kwargs)
 
     def responds_to(self, cmd, cb):
         """
@@ -57,7 +24,7 @@ class Service(TCPServer):
     def get_response(self, msg):
         """
         Attempts to call the handler callback for a given message based
-        on the message command. 
+        on the message command.
         """
         if msg.cmd in self.dispatch:
             reply = self.dispatch[msg.cmd](msg)
@@ -67,6 +34,47 @@ class Service(TCPServer):
             raise ProtocolError('Command not handled')
 
         return reply
+
+
+class Service(Dispatcher, TCPServer):
+    """
+    Basic framework for a TCP/IP listening service using the denim protocol.
+    Provides registration of callbacks based on the message command.
+    """
+    def __init__(self, port=None, host=None, *args, **kwargs):
+        """
+        Creates a service listening on port number `port`. If not specified,
+        uses an OS-assigned port. All other arguments are transparently
+        passed to the parent class' constructor.
+        """
+        Dispatcher.__init__(self)
+        TCPServer.__init__(self, *args, **kwargs)
+        self.port = port
+        self.host = host
+
+    @staticmethod
+    def bind_unused_port():
+        """
+        Creates a listening socket with an OS-assigned port. Returns tuple of
+        (socket, port_number).
+        """
+        [sock] = netutil.bind_sockets(None, 'localhost', family=socket.AF_INET)
+        host, port = sock.getsockname()
+        return sock, host, port
+
+    def start(self, *args, **kwargs):
+        """
+        Starts the listening service. All arguments passed to parent.
+        """
+        if self.port:
+            self.bind(self.port, self.host)
+        else:
+            sock, host, port = Service.bind_unused_port()
+            self.host = host
+            self.port = port
+            self.add_sockets([sock])
+
+        super(Service, self).start(*args, **kwargs)
 
     def handle_stream(self, stream, address):
         """
@@ -88,7 +96,8 @@ class Service(TCPServer):
         try:
             msg = Msg.decode(line)
         except Exception, e:
-            reply = Msg(Msg.ERR, payload=protocol_error(e))
+            # TODO log warning or debug msg
+            return
 
         try:
             reply = self.get_response(msg)
@@ -129,7 +138,7 @@ class Worker(Service):
         host, port = self.manager_addr.split(':')
         reg_msg = Msg(Msg.REG, payload=(host, port))
         self.manager = Client(host, port, self.on_mgr_msg)
-        self.manager.send(reg_msg, start_ping)
+        self.manager.send(reg_msg, self.start_ping)
 
     def start_ping(self, msg):
         pass
@@ -166,18 +175,19 @@ class Manager(Service):
 
 
 class Client(Service):
-    def __init__(self, host, port, on_msg):
+    def __init__(self, host, port, on_connect):
         self.host = host
         self.port = port
         self.pending = dict()
-        self.msg_cb = on_msg
+        self._on_connect = on_connect
 
     def connect(self):
-        self.stream = IOStream(socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0)
+        self.stream = IOStream(sock)
         self.stream.connect((self.host, self.port), self.on_connect)
 
     def on_connect(self):
-        pass
+        self._on_connect(self)
 
     def reader(self, stream):
         self.stream.read_until("\n", self.on_message)
@@ -189,11 +199,9 @@ class Client(Service):
             del self.pending[msg.msgid]
             if cb is not None:
                 cb(msg)
-        else:
-            self.msg_cb(msg)
-
         self.reader()
 
     def send(self, msg, cb=None):
         self.stream.write(msg.encode() + "\n")
-        self.pending[msg.msgid] = cb
+        if cb is not None:
+            self.pending[msg.msgid] = cb

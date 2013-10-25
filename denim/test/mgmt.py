@@ -1,14 +1,16 @@
 import socket
-import os
 from functools import partial
 from tornado.testing import AsyncTestCase
-from tornado.ioloop import IOLoop
 from tornado.iostream import IOStream
 
 
-class ServiceTestCase(AsyncTestCase):
-    loop = IOLoop.instance()
+def connect(host, port, cb):
+    stream = IOStream(socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0))
+    stream.connect((host, port), cb)
+    return stream
 
+
+class ServiceTestCase(AsyncTestCase):
     def test_service(self):
         from denim.mgmt import Service
         from denim.protocol import Msg, ProtocolError
@@ -17,7 +19,7 @@ class ServiceTestCase(AsyncTestCase):
         # 'reply' will hold the message returned by the service
         # 'c' will hold the client stream
         # 's' will hold the service instance
-        state = { 'msg': Msg(Msg.ACK), 'reply': None, 'c': None, 's': None }
+        state = {'msg': Msg(Msg.ACK), 'reply': None, 'c': None, 's': None}
 
         def on_connect(state):
             # Send msg to service
@@ -28,12 +30,11 @@ class ServiceTestCase(AsyncTestCase):
         def get_reply(state, line):
             # Decode reply from service
             state['reply'] = Msg.decode(line)
-            self.loop.stop()
+            self.stop()
 
-        def connect(state):
+        def client(state):
             # Connect to service
-            state['c'] = IOStream(socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0))
-            state['c'].connect(("localhost", state['s'].port), partial(on_connect, state))
+            state['c'] = connect('localhost', state['s'].port, partial(on_connect, state))
 
         def listen(state):
             # Start listening service
@@ -41,9 +42,9 @@ class ServiceTestCase(AsyncTestCase):
             state['s'].start(1)
 
         # Init
-        self.loop.add_callback(listen, state)
-        self.loop.add_callback(connect, state)
-        self.loop.start()
+        self.io_loop.add_callback(listen, state)
+        self.io_loop.add_callback(client, state)
+        self.wait()
 
         # Check results
         msg = state['msg']
