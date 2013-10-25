@@ -1,7 +1,9 @@
 import unittest
 
+
 def _do_work(msg):
     return msg.upper()
+
 
 def _do_fail():
     raise ValueError('test error')

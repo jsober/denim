@@ -54,9 +54,8 @@ class Msg(object):
     ERR = 0
     ACK = 1
     REG = 2
-    DO = 3
+    QUEUE = 3
     DONE = 4
-    QUEUE = 5
 
     def __init__(self, cmd, msgid=None, payload=None):
         if msgid is None:
@@ -67,7 +66,7 @@ class Msg(object):
         self.payload = payload
 
     def encode(self):
-        return "%d|%s|%s" % (
+        return "%d|%s|%s\r\n" % (
             self.cmd,
             self.msgid,
             base64.b64encode(pickle.dumps(self.payload)),
