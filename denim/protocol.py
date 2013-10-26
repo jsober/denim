@@ -51,11 +51,15 @@ class Task(object):
 
 
 class Msg(object):
+    # Request commands
     ERR = 0
     ACK = 1
-    REG = 2
-    QUEUE = 3
-    DONE = 4
+    DONE = 2
+
+    # Response commands
+    REG = 3
+    QUEUE = 4
+    COLLECT = 5
 
     def __init__(self, cmd, msgid=None, payload=None):
         if msgid is None:

@@ -3,30 +3,47 @@ from denim.protocol import Msg, ProtocolError, protocol_error
 
 
 class Client(diesel.Client):
-    def __init__(self, *args, **kwargs):
-        super(Client, self).__init__(*args, **kwargs)
-        self.complete = {}
+    _cmd_err = 'Invalid reply from server: (%d) %r'
 
-    def receive(self):
-        line = diesel.until_eol()
-        msg = Msg.decode(line)
-        self.complete[msg.msgid] = msg
+    def __hash__(self):
+        return (self.addr, self.port)
+
+    def _expect(self, msg, *args):
+        cmds = set(args)
+        if msg.cmd in cmds:
+            return True
+        elif msg.cmd == Msg.ERR:
+            raise ProtocolError(msg.payload)
+        else:
+            raise ProtocolError(self.cmd_err % (msg.cmd, msg.payload))
+
+    def _next_msg(self):
+        return Msg.decode(diesel.until_eol())
+
+    def _send(self, msg):
+        diesel.send(msg.encode())
+
+    def _cmd(self, cmd, expect_cmd, payload=None):
+        msg = Msg(cmd, payload=payload)
+        self._send(msg)
+        reply = self._next_msg()
+        self._expect(reply, expect_cmd)
+        return reply
 
     @diesel.call
     def queue(self, task):
-        msg = Msg(Msg.QUEUE, payload=task)
-        diesel.send(msg.encode())
-        return msg.msgid
+        reply = self._cmd(Msg.QUEUE, Msg.ACK, task)
+        return reply.msgid
 
     @diesel.call
     def wait(self, msgid):
-        while msgid not in self.complete:
-            self.receive()
+        reply = self._cmd(Msg.COLLECT, Msg.DONE, msgid)
+        return reply.payload
 
-        result = self.complete[msgid]
-        del self.complete[msgid]
-
-        return result.payload
+    @diesel.call
+    def register(self, host, port):
+        self._cmd(Msg.REG, Msg.ACK, (host, port))
+        return True
 
 
 class Dispatcher(object):
@@ -58,23 +75,66 @@ class Dispatcher(object):
         return reply
 
 
-class Manager(Dispatcher):
-    def __init__(self):
-        Dispatcher.__init__(self)
+class Service(Dispatcher):
+    """
+    Provides a callable suitable to be passed to a diesel loop that implements
+    the Dispatcher as a TCP/IP service.
+    """
+    def on_service_init(self, service):
+        self.host = service.iface
+        self.port = service.port
+
+    def service_request(self, addr):
+        """
+        Reads a Msg in, attempts to dispatch it, and sends the result back.
+        """
+        line = diesel.until_eol()
+        try:
+            msg = Msg.decode(line)
+        except ProtocolError, e:
+            print e
+            return
+
+        try:
+            reply = self.get_response(msg)
+        except ProtocolError, e:
+            reply = msg.reply(Msg.ERR, e)
+
+        diesel.send(reply.encode())
 
     def __call__(self, addr):
+        """
+        Service loop.
+        """
         while True:
-            line = diesel.until_eol()
+            self.reader(addr)
 
-            try:
-                msg = Msg.decode(line)
-            except ProtocolError, e:
-                print e
-                continue
 
-            try:
-                reply = self.get_response(msg)
-            except ProtocolError, e:
-                reply = msg.reply(Msg.ERR, protocol_error(e))
+class Worker(Service):
+    def __init__(self, manager):
+        super(Worker, self).__init__()
+        host, port = manager.split(':')
+        self.mgr_host = host
+        self.mgr_port = int(port)
 
-            diesel.send(reply.encode())
+    def on_service_init(self, service):
+        super(Worker, self).on_service_init(service)
+        self.register()
+
+    def register(self):
+        client = Client(self.mgr_host, self.mgr_port)
+        with client:
+            client.register(self.host, self.port)
+
+
+class Manager(Dispatcher):
+    def __init__(self):
+        super(Manager, self).__init__()
+        self.workers = set()
+        self.responds_to(Msg.REG, self.handle_reg)
+
+    def handle_reg(self, msg):
+        host, port = msg.payload
+        client = Client(host, port)
+        self.workers.add(client)
+        return msg.reply(Msg.ACK)
