@@ -1,5 +1,4 @@
 from unittest import TestCase
-import diesel
 import mock
 
 
@@ -100,16 +99,35 @@ class WorkerTestCase(TestCase):
     def test_worker_init(self):
         from denim.actors import Worker
 
-        worker = Worker(self.mgr_addr)
+        worker = Worker(None, self.mgr_addr)
         self.assertEqual(worker.mgr_host, self.mgr_host)
         self.assertEqual(worker.mgr_port, self.mgr_port)
 
+    @mock.patch('denim.actors.ProcessPool')
     @mock.patch('denim.actors.Worker.register')
-    def test_worker_on_service_init(self, register):
+    def test_managed_worker_on_service_init(self, register, pool):
         from denim.actors import Worker
 
-        worker = Worker(self.mgr_addr)
-        service = mock.Mock()
-
-        worker.on_service_init(service)
+        worker = Worker(4, self.mgr_addr)
+        worker.on_service_init(mock.Mock())
+        pool.assert_called_once_with(4, worker._worker)
         register.assert_called_once_with()
+
+    @mock.patch('denim.actors.ProcessPool')
+    @mock.patch('denim.actors.Worker.register')
+    def test_standalone_worker_on_service_init(self, register, pool):
+        from denim.actors import Worker
+
+        worker = Worker(4)
+        worker.on_service_init(mock.Mock())
+        pool.assert_called_once_with(4, worker._worker)
+        self.assertEqual(len(register.mock_calls), 0)
+
+    @mock.patch('denim.actors.Client')
+    def test_worker_register(self, client):
+        client.register = mock.Mock()
+
+    @mock.patch('denim.actors.ProcessPool')
+    @mock.patch('denim.actors.Worker.register')
+    def test_handle_queue(self, register, pool):
+        pass

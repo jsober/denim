@@ -42,6 +42,7 @@ class Task(object):
         except Exception, e:
             self.result = e
             self.is_error = True
+        return self
 
     def get_result(self):
         if self.is_error:
@@ -51,12 +52,12 @@ class Task(object):
 
 
 class Msg(object):
-    # Request commands
+    # Response commands
     ERR = 0
     ACK = 1
     DONE = 2
 
-    # Response commands
+    # Request commands
     REG = 3
     QUEUE = 4
     COLLECT = 5
