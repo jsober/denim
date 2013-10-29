@@ -61,6 +61,7 @@ class Msg(object):
     REG = 3
     QUEUE = 4
     COLLECT = 5
+    PING = 6
 
     def __init__(self, cmd, msgid=None, payload=None):
         if msgid is None:
@@ -69,6 +70,9 @@ class Msg(object):
         self.cmd = cmd
         self.msgid = msgid
         self.payload = payload
+
+    def __str__(self):
+        return '<Msg (%d) %s>' % (self.cmd, self.msgid)
 
     def encode(self):
         return "%d|%s|%s\r\n" % (

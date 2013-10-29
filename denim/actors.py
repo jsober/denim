@@ -107,10 +107,9 @@ class Dispatcher(object):
             reply = self.dispatch[msg.cmd](msg)
             if not isinstance(reply, Msg):
                 raise ProtocolError('The server generated an invalid response')
+            return reply
         else:
             raise ProtocolError('Command not handled')
-
-        return reply
 
 
 class Service(Dispatcher):
@@ -118,6 +117,10 @@ class Service(Dispatcher):
     Provides a callable suitable to be passed to a diesel loop that implements
     the Dispatcher as a TCP/IP service.
     """
+    def __init__(self, *args, **kwargs):
+        super(Service, self).__init__(*args, **kwargs)
+        self.responds_to(Msg.PING, self.handle_ping)
+
     def on_service_init(self, service):
         """
         This is called by the diesel service before starting the loop. It lets
@@ -127,58 +130,109 @@ class Service(Dispatcher):
         self.host = service.iface
         self.port = service.port
 
+    def _next_msg(self):
+        """
+        Reads the next line off the wire and decodes it into a `Msg`.
+        """
+        return Msg.decode(diesel.until_eol())
+
+    def _send(self, msg):
+        """
+        Encodes and sends a Msg.
+        """
+        diesel.send(msg.encode())
+
+    def get_response(self, msg, addr):
+        """
+        Allows child classes to intercept by address (Worker in particular).
+        """
+        return super(Service, self).get_response(msg)
+
     def service_request(self, addr):
         """
         Reads a `Msg` in, attempts to dispatch it, and sends the result back.
         'Msg.cmd' values that are not registered via `responds_to` send a
         `Msg.ERR` message back.
+
+        TODO log decode errors
         """
-        line = diesel.until_eol()
         try:
-            msg = Msg.decode(line)
+            msg = self._next_msg()
         except ProtocolError, e:
-            print e
             return
 
         try:
-            reply = self.get_response(msg)
+            reply = self.get_response(msg, addr=addr)
         except ProtocolError, e:
             reply = msg.reply(Msg.ERR, e)
 
-        diesel.send(reply.encode())
+        self._send(reply)
 
     def __call__(self, addr):
         while True:
             self.service_request(addr)
 
+    def handle_ping(self, msg):
+        return msg.reply(Msg.ACK)
+
 
 class Worker(Service):
-    def __init__(self, processes, manager=None):
-        super(Worker, self).__init__()
+    timeout = 5
+    reconnect_retry_time = 5
+
+    # TODO reconnect to mgr when disconnected
+    def __init__(self, processes, manager, *args, **kwargs):
+        super(Worker, self).__init__(*args, **kwargs)
+        """
+        Starts a new worker service. The worker will spawn a process pool with
+        `processes` number of processes when initialized as a diesel service,
+        then register with `manager`, which should be specified as a string of
+        "host:port".
+        """
         self.procs = processes
-        self.is_managed = False
-
-        if manager is not None:
-            host, port = manager.split(':')
-            self.mgr_host = host
-            self.mgr_port = int(port)
-            self.is_managed = True
-
+        self.manager = manager
         self.responds_to(Msg.QUEUE, self.handle_queue)
 
+    def manager_addr(self):
+        """
+        Returns a tuple of the manager's hostname and port.
+        """
+        host, port = self.manager.split(':')
+        return (host, int(port))
+
     def on_service_init(self, service):
+        """
+        Initializes the process pool and registers with the manager.
+        """
         super(Worker, self).on_service_init(service)
         self.pool = ProcessPool(self.procs, self._worker)
-        if self.is_managed:
-            self.register()
+        self.register()
+
+    def get_response(self, msg, addr):
+        """
+        Overrides get_response to throw and error if a message is not from the
+        manager.
+        """
+        if self.addr != self.manager:
+            return msg.reply(Msg.ERR, 'Only accepting messages from the manager.')
+
+        super(Worker, self).get_response(msg, addr)
 
     def register(self):
-        if not self.is_managed:
-            raise ValueError('No manager configured')
-
-        client = Client(self.mgr_host, self.mgr_port)
-        with client:
-            client.register(self.host, self.port)
+        # Connect to host in loop. In case of a connection failure, continues
+        # to retry connecting.
+        # TODO log instead of print
+        for i in xrange(0, 10):
+            try:
+                host, port = self.manager_addr()
+                client = Client(host, port, timeout=self.timeout)
+                with client:
+                    client.register(self.host, self.port)
+                    return
+            except diesel.ClientConnectionError, e:
+                print 'Manager is unavailable (%s). Retrying in %d seconds.' % (e,
+                        self.reconnect_retry_time)
+                diesel.sleep(self.reconnect_retry_time)
 
     def _worker(self, task):
         task.perform()
@@ -193,8 +247,8 @@ class Worker(Service):
 
 
 class Manager(Dispatcher):
-    def __init__(self):
-        super(Manager, self).__init__()
+    def __init__(self, *args, **kwargs):
+        super(Manager, self).__init__(*args, **kwargs)
         self.workers = set()
         self.responds_to(Msg.REG, self.handle_reg)
 
