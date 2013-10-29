@@ -1,7 +1,14 @@
+"""
+TODO:
+    * Client needs to handle non-linear messages (e.g. msg from server isn't
+      necessarily in response to last request)
+    * Manager
+    * Logging
+"""
 from diesel.util.process import ProcessPool
 import diesel
 
-from denim.protocol import Msg, Task, ProtocolError, protocol_error
+from denim.protocol import Msg, Task, ProtocolError
 
 
 class Client(diesel.Client):
@@ -11,6 +18,9 @@ class Client(diesel.Client):
     commands.
     """
     _cmd_err = 'Invalid reply from server: (%d) %r'
+
+    def __init__(self, *args, **kwargs):
+        super(Client, self).__init__(*args, **kwargs)
 
     def __hash__(self):
         """
@@ -276,9 +286,6 @@ class Manager(Dispatcher):
         self.responds_to(Msg.QUEUE, self.handle_queue)
         self.responds_to(Msg.COLLECT, self.handle_queue)
 
-    def ping_loop(self):
-        pass
-
     def handle_reg(self, msg):
         host, port = msg.payload
         if not host or not port:
@@ -287,8 +294,8 @@ class Manager(Dispatcher):
         client = Client(host, port)
         self.workers.add(client)
 
-        loop = diesel.Loop(self.ping_loop)
-        diesel.runtime.current_app.add_loop(loop)
+        #loop = diesel.Loop(self.ping_loop)
+        #diesel.runtime.current_app.add_loop(loop)
 
         return msg.reply(Msg.ACK)
 

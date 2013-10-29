@@ -7,17 +7,6 @@ import base64
 import uuid
 
 
-def protocol_error(msg):
-    if not isinstance(msg, Exception):
-        msg = ProtocolError(msg)
-
-    task = Task(0)
-    task.is_error = True
-    task.result = msg
-
-    return task
-
-
 class ProtocolError(Exception):
     pass
 
