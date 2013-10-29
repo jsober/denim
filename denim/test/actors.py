@@ -198,4 +198,12 @@ class WorkerTestCase(TestCase):
         self.assertEqual(reply.cmd, Msg.DONE)
 
     def test_handle_queue_non_task(self):
-        pass
+        from denim.actors import Worker
+        from denim.protocol import Msg, ProtocolError
+
+        msg = Msg(Msg.QUEUE, payload=None)
+        worker = Worker(self.procs, self.mgr_addr)
+
+        reply = worker.handle_queue(msg)
+        self.assertEqual(reply.cmd, Msg.ERR)
+        self.assertRaises(ProtocolError, reply.payload.get_result)

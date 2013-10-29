@@ -1,5 +1,7 @@
-import diesel
 from diesel.util.process import ProcessPool
+from functools import wraps
+import diesel
+
 from denim.protocol import Msg, Task, ProtocolError, protocol_error
 
 
