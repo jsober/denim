@@ -44,13 +44,13 @@ class Client(diesel.Client):
         else:
             raise ProtocolError(self.cmd_err % (msg.cmd, msg.payload))
 
-    def _next_msg(self):
+    def recv(self):
         """
         Reads the next line off the wire and decodes it into a `Msg`.
         """
         return Msg.decode(diesel.until_eol())
 
-    def _send(self, msg):
+    def send(self, msg):
         """
         Encodes and sends a Msg.
         """
@@ -62,35 +62,44 @@ class Client(diesel.Client):
         the expected command value or raises a `ProtocolError`.
         """
         msg = Msg(cmd, payload=payload)
-        self._send(msg)
-        reply = self._next_msg()
+        self.send(msg)
+        reply = self.recv()
         self._expect(reply, expect_cmd)
         return reply
 
     @diesel.call
-    def queue(self, task):
+    def queue(self, *args, **kwargs):
         """
         Sends a `Task` to the remote host. Returns the `msgid`.
         """
-        reply = self._cmd(Msg.QUEUE, Msg.ACK, task)
-        return reply.msgid
+        self._queue(*args, **kwargs)
 
     @diesel.call
-    def wait(self, msgid):
+    def wait(self, *args, **kwargs):
         """
         Cedes thread control until `msgid` is completed. Returns the result of
         the originally `Task` or raises an exception if the `Task` triggered
         one during processing.
         """
-        reply = self._cmd(Msg.COLLECT, Msg.DONE, msgid)
-        return reply.payload.get_result()
+        self._wait(*args, **kwargs)
 
     @diesel.call
-    def register(self, host, port):
+    def register(self, *args, **kwargs):
         """
         Registers with a remote Manager. The remote host will connect back to
         the provided `host` and `port`.
         """
+        self._register(*args, **kwargs)
+
+    def _queue(self, task):
+        reply = self._cmd(Msg.QUEUE, Msg.ACK, task)
+        return reply.msgid
+
+    def _wait(self, msgid):
+        reply = self._cmd(Msg.COLLECT, Msg.DONE, msgid)
+        return reply.payload.get_result()
+
+    def _register(self, host, port):
         self._cmd(Msg.REG, Msg.ACK, (host, port))
         return True
 

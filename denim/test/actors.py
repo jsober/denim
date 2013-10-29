@@ -2,11 +2,66 @@ from unittest import TestCase
 import mock
 
 
-def upper(value):
-    """
-    Simple test function for testing Tasks.
-    """
-    return value.upper()
+def upper(subject):
+    return subject.upper()
+
+
+class ClientTestCase(TestCase):
+    host = 'localhost'
+    port = 8001
+
+    @mock.patch('diesel.send')
+    @mock.patch('diesel.Client.__init__')
+    def test_send(self, client_init, send):
+        from denim.actors import Client
+        from denim.protocol import Msg
+
+        m = Msg(Msg.ACK)
+        c = Client(self.host, self.port)
+        c.send(m)
+
+        send.assert_called_once_with(m.encode())
+
+    @mock.patch('diesel.until_eol')
+    @mock.patch('diesel.Client.__init__')
+    def test_recv(self, client_init, until_eol):
+        from denim.actors import Client
+        from denim.protocol import Msg
+
+        reply = Msg(Msg.ACK)
+        until_eol.return_value = reply.encode()
+
+        c = Client(self.host, self.port)
+        msg = c.recv()
+
+        until_eol.assert_called_once_with()
+        self.assertEqual(msg.msgid, reply.msgid)
+
+    @mock.patch('diesel.send')
+    @mock.patch('diesel.until_eol')
+    @mock.patch('diesel.Client.__init__')
+    def test_queue_ok(self, client_init, until_eol, send):
+        from denim.actors import Client
+        from denim.protocol import Msg, Task
+
+        reply = Msg(Msg.ACK)
+        until_eol.return_value = reply.encode()
+
+        t = Task(upper, "test value")
+        c = Client(self.host, self.port)
+
+        msgid = c._queue(t)
+
+        self.assertEqual(msgid, reply.msgid)
+
+    def test_queue_rejected(self):
+        pass
+
+    def test_wait(self):
+        pass
+
+    def test_register(self):
+        pass
 
 
 class DispatcherTestCase(TestCase):

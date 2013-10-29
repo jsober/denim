@@ -51,6 +51,7 @@ class Msg(object):
     QUEUE = 4
     COLLECT = 5
     PING = 6
+    REJECTED = 7
 
     def __init__(self, cmd, msgid=None, payload=None):
         if msgid is None:
