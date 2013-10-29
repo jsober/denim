@@ -1,5 +1,4 @@
 from diesel.util.process import ProcessPool
-from functools import wraps
 import diesel
 
 from denim.protocol import Msg, Task, ProtocolError, protocol_error
@@ -29,7 +28,7 @@ class Client(diesel.Client):
         """
         cmds = set(args)
         if msg.cmd == Msg.ERR:
-            raise ProtocolError(msg.payload)
+            raise msg.payload
         elif msg.cmd in cmds:
             return True
         else:
@@ -106,10 +105,7 @@ class Dispatcher(object):
         on the message command.
         """
         if msg.cmd in self.dispatch:
-            reply = self.dispatch[msg.cmd](msg)
-            if not isinstance(reply, Msg):
-                raise ProtocolError('The server generated an invalid response')
-            return reply
+            return self.dispatch[msg.cmd](msg)
         else:
             raise ProtocolError('Command not handled')
 
@@ -168,6 +164,9 @@ class Service(Dispatcher):
         except Exception, e:
             reply = msg.reply(Msg.ERR, e)
 
+        if not isinstance(reply, Msg):
+            reply = msg.reply(Msg.ERR, 'The server generated an invalid response')
+
         self._send(reply)
 
     def __call__(self, addr):
@@ -179,6 +178,11 @@ class Service(Dispatcher):
 
 
 class Worker(Service):
+    """
+    Workers are the end-points of the task workflow in denim. They maintain a
+    pool of processes that are used to service requests from a Manager. Workers
+    will only respond to requests from Managers.
+    """
     timeout = 5
     reconnect_retry_time = 5
 
@@ -216,7 +220,7 @@ class Worker(Service):
         manager.
         """
         if addr != self.manager:
-            return msg.reply(Msg.ERR, protocol_error('Tasks must be queued through the manager.'))
+            raise ProtocolError('Tasks must be queued through the manager')
 
         return super(Worker, self).get_response(msg, addr)
 
@@ -258,7 +262,7 @@ class Worker(Service):
         `Task` object.
         """
         if not isinstance(msg.payload, Task):
-            return msg.reply(Msg.ERR, protocol_error('Invalid message payload'))
+            raise ProtocolError('Invalid message payload')
 
         task = self.pool(msg.payload)
         return msg.reply(Msg.DONE, payload=task)
@@ -269,9 +273,27 @@ class Manager(Dispatcher):
         super(Manager, self).__init__(*args, **kwargs)
         self.workers = set()
         self.responds_to(Msg.REG, self.handle_reg)
+        self.responds_to(Msg.QUEUE, self.handle_queue)
+        self.responds_to(Msg.COLLECT, self.handle_queue)
+
+    def ping_loop(self):
+        pass
 
     def handle_reg(self, msg):
         host, port = msg.payload
+        if not host or not port:
+            raise ProtocolError('Invalid host or port')
+
         client = Client(host, port)
         self.workers.add(client)
+
+        loop = diesel.Loop(self.ping_loop)
+        diesel.runtime.current_app.add_loop(loop)
+
         return msg.reply(Msg.ACK)
+
+    def handle_queue(self, msg):
+        raise NotImplemented
+
+    def handle_collect(self, msg):
+        raise NotImplemented

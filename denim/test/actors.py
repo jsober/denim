@@ -173,15 +173,11 @@ class WorkerTestCase(TestCase):
 
     def test_get_response_from_other(self):
         from denim.actors import Worker
-        from denim.protocol import Msg, Task, ProtocolError
+        from denim.protocol import Msg, ProtocolError
 
-        msg = Msg(Msg.PING)
         worker = Worker(self.procs, self.mgr_addr)
-        reply = worker.get_response(msg, 'fail')
-
-        self.assertEqual(reply.cmd, Msg.ERR)
-        self.assertIsInstance(reply.payload, Task)
-        self.assertRaises(ProtocolError, reply.payload.get_result)
+        bad_addr = 'invalid mgr addr'
+        self.assertRaises(ProtocolError, worker.get_response, Msg(Msg.PING), bad_addr)
 
     @mock.patch('denim.actors.ProcessPool')
     def test_handle_queue_task(self, pool):
@@ -204,6 +200,4 @@ class WorkerTestCase(TestCase):
         msg = Msg(Msg.QUEUE, payload=None)
         worker = Worker(self.procs, self.mgr_addr)
 
-        reply = worker.handle_queue(msg)
-        self.assertEqual(reply.cmd, Msg.ERR)
-        self.assertRaises(ProtocolError, reply.payload.get_result)
+        self.assertRaises(ProtocolError, worker.handle_queue, msg)
