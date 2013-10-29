@@ -163,7 +163,7 @@ class Service(Dispatcher):
 
         try:
             reply = self.get_response(msg, addr=addr)
-        except ProtocolError, e:
+        except Exception, e:
             reply = msg.reply(Msg.ERR, e)
 
         self._send(reply)
@@ -213,34 +213,50 @@ class Worker(Service):
         Overrides get_response to throw and error if a message is not from the
         manager.
         """
-        if self.addr != self.manager:
-            return msg.reply(Msg.ERR, 'Only accepting messages from the manager.')
+        if addr != self.manager:
+            return msg.reply(Msg.ERR, protocol_error('Tasks must be queued through the manager.'))
 
-        super(Worker, self).get_response(msg, addr)
+        return super(Worker, self).get_response(msg, addr)
 
     def register(self):
-        # Connect to host in loop. In case of a connection failure, continues
-        # to retry connecting.
-        # TODO log instead of print
-        for i in xrange(0, 10):
+        """
+        Continuously retries to connect to server. If a connection fails, retries
+        after `Worker.reconnect_retry_time` seconds.
+
+        TODO log instead of print
+        """
+        print 'Connecting to manager: %s' % self.manager
+        host, port = self.manager_addr()
+
+        while True:
             try:
-                host, port = self.manager_addr()
                 client = Client(host, port, timeout=self.timeout)
-                with client:
-                    client.register(self.host, self.port)
-                    return
             except diesel.ClientConnectionError, e:
                 print 'Manager is unavailable (%s). Retrying in %d seconds.' % (e,
                         self.reconnect_retry_time)
                 diesel.sleep(self.reconnect_retry_time)
+                continue
+
+            with client:
+                client.register(self.host, self.port)
+                return
 
     def _worker(self, task):
+        """
+        Worker process handler code. Wraps `task.perform` and returns the
+        `Task` object passed in.
+        """
         task.perform()
         return task
 
     def handle_queue(self, msg):
+        """
+        Accepts new messages from a client (the manager) with the `Msg.QUEUE`
+        command. Raises a `ProtocolError` if the message payload is not a
+        `Task` object.
+        """
         if not isinstance(msg.payload, Task):
-            return protocol_error('Invalid message payload')
+            return msg.reply(Msg.ERR, protocol_error('Invalid message payload'))
 
         task = self.pool(msg.payload)
         return msg.reply(Msg.DONE, payload=task)

@@ -132,38 +132,70 @@ class WorkerTestCase(TestCase):
         client.assert_called_once_with(self.mgr_host, self.mgr_port, timeout=worker.timeout)
         inst.register.assert_called_once_with('localhost', 8001)
 
+    @mock.patch('diesel.sleep')
     @mock.patch('denim.actors.Client')
-    def test_worker_register_retry(self, client):
+    def test_worker_register_retry(self, client, sleep):
         from diesel import ClientConnectionError
         from denim.actors import Worker
 
         inst = self._mock_client_instance(client)
+        inst.register = mock.Mock()
 
-        def reg_fail(*args):
-            def reg_ok(*args):
-                return
-            inst.register.side_effect = reg_ok
-            raise ClientConnectionError
+        def connect_fail(*args, **kwargs):
+            def connect_ok(*args, **kwargs):
+                return inst
+            client.side_effect = connect_ok
+            raise ClientConnectionError('mock connection error')
 
-        inst.register = mock.Mock(side_effect=reg_fail)
+        client.side_effect = connect_fail
 
         worker = Worker(self.procs, self.mgr_addr)
         worker.host = 'localhost'
         worker.port = 8001
         worker.register()
 
+        sleep.assert_called_once_with(worker.reconnect_retry_time)
+
         self.assertEqual(client.call_args_list, [
             mock.call(self.mgr_host, self.mgr_port, timeout=worker.timeout),
             mock.call(self.mgr_host, self.mgr_port, timeout=worker.timeout),
         ])
 
-        self.assertEqual(inst.register.call_args_list, [
-            mock.call('localhost', 8001),
-            mock.call('localhost', 8001),
-        ])
+        inst.register.called_once_with('localhost', 8001)
 
-    def test_handle_queue_from_mgr(self):
-        pass
+    @mock.patch('denim.actors.Service.get_response')
+    def test_get_response_from_mgr(self, get_response):
+        from denim.actors import Worker
 
-    def test_handle_queue_from_other(self):
+        worker = Worker(self.procs, self.mgr_addr)
+        worker.get_response(None, self.mgr_addr)
+        get_response.assert_called_once_with(None, self.mgr_addr)
+
+    def test_get_response_from_other(self):
+        from denim.actors import Worker
+        from denim.protocol import Msg, Task, ProtocolError
+
+        msg = Msg(Msg.PING)
+        worker = Worker(self.procs, self.mgr_addr)
+        reply = worker.get_response(msg, 'fail')
+
+        self.assertEqual(reply.cmd, Msg.ERR)
+        self.assertIsInstance(reply.payload, Task)
+        self.assertRaises(ProtocolError, reply.payload.get_result)
+
+    @mock.patch('denim.actors.ProcessPool')
+    def test_handle_queue_task(self, pool):
+        from denim.actors import Worker
+        from denim.protocol import Msg, Task
+
+        task = Task(lambda: 42)
+        msg = Msg(Msg.QUEUE, payload=task)
+        worker = Worker(self.procs, self.mgr_addr)
+        worker.pool = pool()
+
+        reply = worker.handle_queue(msg)
+        self.assertIsInstance(reply, Msg)
+        self.assertEqual(reply.cmd, Msg.DONE)
+
+    def test_handle_queue_non_task(self):
         pass
