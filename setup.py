@@ -19,6 +19,6 @@ performance under stress.
         'denim.protocol',
     ],
     install_requires=([
-        'diesel',
+        'tornado',
     ])
 )

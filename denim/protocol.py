@@ -8,7 +8,17 @@ import uuid
 
 
 class ProtocolError(Exception):
-    pass
+    def __init__(self, msg, cmd=None):
+        super(ProtocolError, self).__init__(msg)
+        self.cmd = cmd
+
+    def __str__(self):
+        msg = super(ProtocolError, self).__str__()
+        return '(%d) %s' % (self.cmd, msg)
+
+    def __unicode__(self):
+        msg = super(ProtocolError, self).__unicode__()
+        return '(%d) %s' % (self.cmd, msg)
 
 
 class Task(object):
@@ -42,16 +52,17 @@ class Task(object):
 
 class Msg(object):
     # Response commands
-    ERR = 0
+    ERROR = 0
     ACK = 1
     DONE = 2
+    NOT_DONE = 3
 
     # Request commands
-    REG = 3
-    QUEUE = 4
-    COLLECT = 5
-    PING = 6
-    REJECTED = 7
+    REGISTER = 4
+    QUEUE = 5
+    COLLECT = 6
+    PING = 7
+    REJECTED = 8
 
     def __init__(self, cmd, msgid=None, payload=None):
         if msgid is None:
@@ -64,8 +75,14 @@ class Msg(object):
     def __str__(self):
         return '<Msg (%d) %s>' % (self.cmd, self.msgid)
 
+    def __unicode__(self):
+        return self.__str__()
+
+    def __eq__(self, other):
+        return self.msgid == other.msgid
+
     def encode(self):
-        return "%d|%s|%s\r\n" % (
+        return "%d|%s|%s" % (
             self.cmd,
             self.msgid,
             base64.b64encode(pickle.dumps(self.payload)),
