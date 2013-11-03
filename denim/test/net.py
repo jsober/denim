@@ -17,7 +17,7 @@ class NetTestCase(AsyncTestCase):
             's_reply': None,
         }
 
-        def s_on_msg(msg, service):
+        def s_on_msg(msg, client, service):
             results['s_msg_pend'] = s.is_pending(msg.msgid)
             reply = msg.reply(Msg.ACK)
             s.reply(reply)
@@ -34,13 +34,13 @@ class NetTestCase(AsyncTestCase):
             results['c_msg_pend'] = c.is_pending(msg.msgid)
             results['c_msg_sent'] = msg
 
-        def c_on_reply(reply):
+        def c_on_reply(reply, client):
             results['c_reply'] = reply
             s.stop()
             c.close()
             self.stop()
 
-        def c_on_close():
+        def c_on_close(client):
             results['c_close'] = True
 
         def c_on_msg():

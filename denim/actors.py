@@ -2,7 +2,6 @@
 TODO persistent storage of pending tasks?
 """
 import logging
-from collections import deque
 from itertools import ifilter
 from denim.protocol import Msg
 from denim.util import Tracking
@@ -38,17 +37,28 @@ class Actor(Dispatcher):
         self.responds_to(Msg.COLLECT, self.handle_collect)
         self.pending = {}
         self.complete = {}
+        self.waiting = {}
 
     def handle_queue(self, msg, client, service):
         self.pending[msg.msgid] = msg
         service.reply(msg.reply(Msg.ACK))
 
     def handle_collect(self, msg, client, service):
-        raise NotImplemented
+        if msg.msgid in self.complete:
+            reply = self.complete[msg.msgid]
+            del self.complete[msg.msgid]
+            service.reply(reply)
+        else:
+            self.waiting[msg.msgid] = client
 
     def set_complete(self, msg):
         del self.pending[msg.msgid]
-        self.complete[msg.msgid] = msg
+        if msg.msgid in self.waiting:
+            client = self.waiting[msg.msgid]
+            del self.waiting[msg.msgid]
+            client.send(msg)
+        else:
+            self.complete[msg.msgid] = msg
 
 
 class Manager(Actor):
@@ -73,6 +83,7 @@ class Manager(Actor):
 
     def handle_register(self, msg, client, service):
         capacity = msg.payload['capacity']
+        service.reply(msg.reply(Msg.ACK))
 
         # Steal and configure pipe as worker
         service.steal_pipe(client)
@@ -89,11 +100,11 @@ class Manager(Actor):
             worker.send(msg, self.worker_msg)
             self.tracking[worker.fd].start_tracking(msg.msgid)
             self.assigned[msg.msgid] = worker.fd
+            service.reply(msg.reply(Msg.ACK))
         else:
             service.reply(msg.reply(Msg.REJECTED))
 
     def worker_close(self, worker):
-        raise NotImplemented
         for msgid in self.assigned.keys():
             if self.assigned[msgid] == worker.fd:
                 reply = Msg(Msg.ERR, msgid, payload='Worker disconnected while processing message.')
